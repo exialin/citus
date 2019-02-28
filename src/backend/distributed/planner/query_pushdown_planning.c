@@ -83,7 +83,7 @@ static List * FlattenJoinVars(List *columnList, Query *queryTree);
 static void UpdateVarMappingsForExtendedOpNode(List *columnList,
 											   List *flattenedColumnList,
 											   List *subqueryTargetEntryList);
-static void SetColumnVariablesToTargetEntries(Var *column, Node *flattenedExpr,
+static void UpdateColumnToMatchingTargetEntry(Var *column, Node *flattenedExpr,
 											  List *targetEntryList);
 static MultiTable * MultiSubqueryPushdownTable(Query *subquery);
 static List * CreateSubqueryTargetEntryList(List *columnList);
@@ -1616,38 +1616,11 @@ FlattenJoinVars(List *columnList, Query *queryTree)
 			}
 
 			normalizedNode = flatten_join_alias_vars(root, (Node *) column);
-
-			/*
-			 * We need to copy values over existing one to make sure it is updated on
-			 * respective places.
-			 */
-
-			if (IsA(normalizedNode, Var))
-			{
-				Var *var = makeNode(Var);
-
-				memcpy(var, normalizedNode, sizeof(Var));
-				flattenedExprList = lappend(flattenedExprList, var);
-			}
-			else if (IsA(normalizedNode, CoalesceExpr))
-			{
-				CoalesceExpr *coalesceExpr = makeNode(CoalesceExpr);
-
-				memcpy(coalesceExpr, normalizedNode, sizeof(CoalesceExpr));
-				flattenedExprList = lappend(flattenedExprList, coalesceExpr);
-			}
-			else
-			{
-				elog(ERROR, "unrecognized node type on the target list: %d",
-					 nodeTag(normalizedNode));
-			}
+			flattenedExprList = lappend(flattenedExprList, copyObject(normalizedNode));
 		}
 		else
 		{
-			Var *var = makeNode(Var);
-
-			memcpy(var, column, sizeof(Var));
-			flattenedExprList = lappend(flattenedExprList, var);
+			flattenedExprList = lappend(flattenedExprList, copyObject(column));
 		}
 	}
 
@@ -1670,7 +1643,7 @@ CreateSubqueryTargetEntryList(List *exprList)
 	foreach(exprCell, exprList)
 	{
 		Node *expr = (Node *) lfirst(exprCell);
-		uniqueExprList = list_append_unique(uniqueExprList, copyObject(expr));
+		uniqueExprList = list_append_unique(uniqueExprList, expr);
 	}
 
 	foreach(exprCell, uniqueExprList)
@@ -1712,19 +1685,30 @@ UpdateVarMappingsForExtendedOpNode(List *columnList, List *flattenedExprList,
 		Var *columnOnTheExtendedNode = (Var *) lfirst(columnCell);
 		Node *flattenedExpr = (Node *) lfirst(flattenedExprCell);
 
-		SetColumnVariablesToTargetEntries(columnOnTheExtendedNode, flattenedExpr,
+		/*
+		 * As an optimization, subqueryTargetEntryList only consists of
+		 * distinct elements. In other words, any duplicate entries in the
+		 * target list consolidated into a single element to prevent pulling
+		 * unnecessary data from the worker nodes (e.g. SELECT a,a,a,b,b,b FROM x;
+		 * is turned into SELECT a,b FROM x_102008).
+		 *
+		 * Thus, at this point we should iterate on the subqueryTargetEntryList
+		 * and ensure that the column on the extended op node points to the
+		 * correct target entry.
+		 */
+		UpdateColumnToMatchingTargetEntry(columnOnTheExtendedNode, flattenedExpr,
 										  subqueryTargetEntryList);
 	}
 }
 
 
 /*
- * SetColumnVariablesToTargetEntries sets the variable of given column entry to
+ * UpdateColumnToMatchingTargetEntry sets the variable of given column entry to
  * the matching entry of the targetEntryList. Since data type of the column can
  * be different from the types of the elements of targetEntryList, we use flattenedExpr.
  */
 static void
-SetColumnVariablesToTargetEntries(Var *column, Node *flattenedExpr, List *targetEntryList)
+UpdateColumnToMatchingTargetEntry(Var *column, Node *flattenedExpr, List *targetEntryList)
 {
 	ListCell *targetEntryCell = NULL;
 
@@ -1764,11 +1748,6 @@ SetColumnVariablesToTargetEntries(Var *column, Node *flattenedExpr, List *target
 		}
 		else
 		{
-			/*
-			 * Although following else should not be hit by any query given we made the
-			 * same check in the FlattenJoinVars function, it is added for the sake of
-			 * completeness.
-			 */
 			elog(ERROR, "unrecognized node type on the target list: %d",
 				 nodeTag(targetEntry->expr));
 		}
