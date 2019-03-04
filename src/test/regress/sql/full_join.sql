@@ -57,6 +57,12 @@ FROM test_table_1 FULL JOIN test_table_3 USING(id, val1)
 GROUP BY test_table_1.id
 ORDER BY 1;
 
+-- Test the left join as well
+SELECT max(val1)
+FROM test_table_1 LEFT JOIN test_table_3 USING(id, val1)
+GROUP BY test_table_1.id
+ORDER BY 1;
+
 -- Full outer join with different distribution column types, should error out
 SELECT * FROM test_table_1 full join test_table_2 using(id);
 
