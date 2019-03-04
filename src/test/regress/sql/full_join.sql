@@ -4,6 +4,9 @@
 
 SET citus.next_shard_id TO 9000000;
 
+CREATE SCHEMA full_join;
+SET search_path TO full_join, public;
+
 CREATE TABLE test_table_1(id int, val1 int);
 CREATE TABLE test_table_2(id bigint, val1 int);
 CREATE TABLE test_table_3(id int, val1 bigint);
@@ -41,6 +44,19 @@ SELECT * FROM
 -- Full join using multiple columns
 SELECT * FROM test_table_1 FULL JOIN test_table_3 USING(id, val1) ORDER BY 1;
 
+-- Full join with complicated target lists
+SELECT count(DISTINCT id), (avg(test_table_1.val1) + id * id)::integer as avg_value, id::numeric IS NOT NULL as not_null 
+FROM test_table_1 FULL JOIN test_table_3 using(id)
+WHERE id::bigint < 55
+GROUP BY id
+ORDER BY 2
+ASC LIMIT 3;
+
+SELECT max(val1)
+FROM test_table_1 FULL JOIN test_table_3 USING(id, val1)
+GROUP BY test_table_1.id
+ORDER BY 1;
+
 -- Full outer join with different distribution column types, should error out
 SELECT * FROM test_table_1 full join test_table_2 using(id);
 
@@ -51,6 +67,9 @@ INSERT INTO test_table_3 VALUES(7, NULL);
 
 -- Get all columns as the result of the full join
 SELECT * FROM test_table_1 FULL JOIN test_table_3 using(id) ORDER BY 1;
+
+-- Get the same result (with multiple id)
+SELECT * FROM test_table_1 FULL JOIN test_table_3 ON (test_table_1.id = test_table_3.id) ORDER BY 1;
 
 -- Full join using multiple columns
 SELECT * FROM test_table_1 FULL JOIN test_table_3 USING(id, val1) ORDER BY 1;
@@ -87,5 +106,4 @@ SELECT * FROM
 -- Full join using multiple columns
 SELECT * FROM test_table_1 FULL JOIN test_table_2 USING(id, val1) ORDER BY 1,2;
 
-DROP TABLE test_table_1;
-DROP TABLE test_table_2;
+DROP SCHEMA full_join CASCADE;

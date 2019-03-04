@@ -1615,7 +1615,7 @@ FlattenJoinVars(List *columnList, Query *queryTree)
 				root->hasJoinRTEs = true;
 			}
 
-			normalizedNode = flatten_join_alias_vars(root, (Node *) column);
+			normalizedNode = strip_implicit_coercions(flatten_join_alias_vars(root, (Node *) column));
 			flattenedExprList = lappend(flattenedExprList, copyObject(normalizedNode));
 		}
 		else
@@ -1729,6 +1729,10 @@ UpdateColumnToMatchingTargetEntry(Var *column, Node *flattenedExpr, List *target
 		}
 		else if (IsA(targetEntry->expr, CoalesceExpr))
 		{
+			/*
+			 * flatten_join_alias_vars() flattens full oter joins' columns that is
+			 * in the USING part into COALESCE(left_col, right_col)
+			 */
 			CoalesceExpr *targetCoalesceExpr = (CoalesceExpr *) targetEntry->expr;
 
 			if (IsA(flattenedExpr, CoalesceExpr) && equal(flattenedExpr,
